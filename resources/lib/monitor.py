@@ -18,7 +18,6 @@ class UpNextMonitor(Monitor):
         self.player = UpNextPlayer()
         self.api = Api()
         self.playback_manager = PlaybackManager()
-        self._addon_triggered = False
         self._force_popup = False
         Monitor.__init__(self)
 
@@ -108,7 +107,6 @@ class UpNextMonitor(Monitor):
             if self._force_popup:
                 self.log('Force-popup flag set, launching Up Next popup on main thread', 2)
                 self._force_popup = False
-                self._addon_triggered = False
                 self.player.set_last_file(current_file)
                 self.playback_manager.launch_up_next()
                 self.log('Up Next force-popup launch complete', 2)
@@ -117,13 +115,6 @@ class UpNextMonitor(Monitor):
 
             if total_time - play_time > notification_time:
                 # Media hasn't reach notification time yet, waiting a bit longer...
-                continue
-
-            # Skip time-based launch if the popup was already triggered by an
-            # upnext_data notification (e.g. from jellyfin-kodi segment boundary)
-            if self._addon_triggered:
-                self._addon_triggered = False
-                self.player.disable_tracking()
                 continue
 
             self.player.set_last_file(current_file)
@@ -150,9 +141,9 @@ class UpNextMonitor(Monitor):
         self.player.enable_tracking()
         self.player.reset_queue()
 
-        # Immediately queue a popup launch to be executed on the main service
-        # thread (thread-safe), bypassing the time-based trigger in run().
-        self.log('Received upnext_data from %s, setting force-popup flag for main-thread launch' % sender, 2)
-        self._addon_triggered = True
+        if self._force_popup:
+            self.log('Duplicate upnext_data from %s suppressed, popup already pending' % sender, 2)
+            return
+
+        self.log('Received upnext_data from %s, scheduling force-popup on main service thread' % sender, 2)
         self._force_popup = True
-        self.log('Force-popup flag set, waiting for main service loop to execute', 2)
