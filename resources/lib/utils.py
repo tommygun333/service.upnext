@@ -5,7 +5,7 @@ from __future__ import absolute_import, division, unicode_literals
 import sys
 import json
 from datetime import date
-from re import split as re_split
+from re import match as re_match, split as re_split
 from xbmc import executeJSONRPC, getInfoLabel, getRegion, log as xlog, LOGDEBUG, LOGINFO
 from xbmcaddon import Addon
 from xbmcgui import Window
@@ -206,6 +206,13 @@ def localize(string_id):
 
 def localize_date(date_string):
     """Localize date format"""
+    if not date_string:
+        return ''
+    if not isinstance(date_string, str):
+        date_string = str(date_string)
+    if re_match(r'^\d{4}$', date_string):
+        return date_string
+
     date_format = getRegion('dateshort')
 
     try:
@@ -215,7 +222,7 @@ def localize_date(date_string):
             int(part)
             for part in re_split(r'[\W]', date_string)[:3]
         ))
-    except ValueError:
+    except (TypeError, ValueError):
         return date_string
 
     return date_object.strftime(date_format)
