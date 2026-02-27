@@ -2,8 +2,6 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
-import threading
-import time
 from xbmc import Monitor
 from api import Api
 from playbackmanager import PlaybackManager
@@ -21,7 +19,7 @@ class UpNextMonitor(Monitor):
         self.api = Api()
         self.playback_manager = PlaybackManager()
         self._addon_triggered = False
-        self._deferred_launch_pending = False
+        self._force_popup = False
         Monitor.__init__(self)
 
     def log(self, msg, level=1):
@@ -104,6 +102,19 @@ class UpNextMonitor(Monitor):
                 continue
 
             notification_time = self.api.notification_time(total_time=total_time)
+
+            # If an upnext_data notification requested an immediate popup, launch it
+            # now on the main service thread (thread-safe) without a time check.
+            if self._force_popup:
+                self.log('Force-popup flag set, launching Up Next popup on main thread', 2)
+                self._force_popup = False
+                self._addon_triggered = False
+                self.player.set_last_file(current_file)
+                self.playback_manager.launch_up_next()
+                self.log('Up Next force-popup launch complete', 2)
+                self.player.disable_tracking()
+                continue
+
             if total_time - play_time > notification_time:
                 # Media hasn't reach notification time yet, waiting a bit longer...
                 continue
@@ -139,27 +150,9 @@ class UpNextMonitor(Monitor):
         self.player.enable_tracking()
         self.player.reset_queue()
 
-        # Immediately launch the Up Next popup rather than waiting for the
-        # time-based trigger in run(). This ensures the popup appears right
-        # when the segment boundary is reached (e.g. Preview or Credits segment
-        # from jellyfin-kodi), not X seconds before the episode ends.
-        # A short delay allows the Kodi UI to settle (e.g. dismiss OSD/seekbar)
-        # before the dialog is presented, reducing the perceived ~11s lag.
-        self.log('Received upnext_data from %s at t=%.3f, scheduling deferred Up Next popup' % (sender, time.time()), 2)
+        # Immediately queue a popup launch to be executed on the main service
+        # thread (thread-safe), bypassing the time-based trigger in run().
+        self.log('Received upnext_data from %s, setting force-popup flag for main-thread launch' % sender, 2)
         self._addon_triggered = True
-        if not self._deferred_launch_pending:
-            self._deferred_launch_pending = True
-            self.log('Deferred launch scheduled at t=%.3f' % time.time(), 2)
-
-            def _deferred_launch():
-                time.sleep(0.3)
-                self.log('Opening Up Next popup at t=%.3f' % time.time(), 2)
-                self.playback_manager.launch_up_next()
-                self.player.disable_tracking()
-                self._deferred_launch_pending = False
-
-            deferred_launch_thread = threading.Thread(target=_deferred_launch)
-            deferred_launch_thread.daemon = True
-            deferred_launch_thread.start()
-        else:
-            self.log('Deferred launch already pending, skipping duplicate scheduling', 2)
+        self._force_popup = True
+        self.log('Force-popup flag set, waiting for main service loop to execute', 2)
