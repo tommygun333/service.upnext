@@ -18,6 +18,7 @@ class UpNextMonitor(Monitor):
         self.player = UpNextPlayer()
         self.api = Api()
         self.playback_manager = PlaybackManager()
+        self._addon_triggered = False
         Monitor.__init__(self)
 
     def log(self, msg, level=1):
@@ -104,6 +105,13 @@ class UpNextMonitor(Monitor):
                 # Media hasn't reach notification time yet, waiting a bit longer...
                 continue
 
+            # Skip time-based launch if the popup was already triggered by an
+            # upnext_data notification (e.g. from jellyfin-kodi segment boundary)
+            if self._addon_triggered:
+                self._addon_triggered = False
+                self.player.disable_tracking()
+                continue
+
             self.player.set_last_file(current_file)
             self.log('Show notification as episode (of length %d secs) ends in %d secs' % (total_time, notification_time), 2)
             self.playback_manager.launch_up_next()
@@ -127,3 +135,12 @@ class UpNextMonitor(Monitor):
         self.api.addon_data_received(decoded_data, encoding=encoding)
         self.player.enable_tracking()
         self.player.reset_queue()
+
+        # Immediately launch the Up Next popup rather than waiting for the
+        # time-based trigger in run(). This ensures the popup appears right
+        # when the segment boundary is reached (e.g. Preview or Credits segment
+        # from jellyfin-kodi), not X seconds before the episode ends.
+        self.log('Received upnext_data from %s, launching Up Next popup immediately' % sender, 2)
+        self._addon_triggered = True
+        self.playback_manager.launch_up_next()
+        self.player.disable_tracking()
