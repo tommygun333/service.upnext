@@ -10,3 +10,4 @@ kodi-addon-checker.log
 
 # IDE Workspaces
 .idea/
+coverage.xml
