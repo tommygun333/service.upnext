@@ -2,6 +2,8 @@
 # GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
 
 from __future__ import absolute_import, division, unicode_literals
+import threading
+import time
 from xbmc import Monitor
 from api import Api
 from playbackmanager import PlaybackManager
@@ -19,6 +21,7 @@ class UpNextMonitor(Monitor):
         self.api = Api()
         self.playback_manager = PlaybackManager()
         self._addon_triggered = False
+        self._deferred_launch_pending = False
         Monitor.__init__(self)
 
     def log(self, msg, level=1):
@@ -140,7 +143,23 @@ class UpNextMonitor(Monitor):
         # time-based trigger in run(). This ensures the popup appears right
         # when the segment boundary is reached (e.g. Preview or Credits segment
         # from jellyfin-kodi), not X seconds before the episode ends.
-        self.log('Received upnext_data from %s, launching Up Next popup immediately' % sender, 2)
+        # A short delay allows the Kodi UI to settle (e.g. dismiss OSD/seekbar)
+        # before the dialog is presented, reducing the perceived ~11s lag.
+        self.log('Received upnext_data from %s at t=%.3f, scheduling deferred Up Next popup' % (sender, time.time()), 2)
         self._addon_triggered = True
-        self.playback_manager.launch_up_next()
-        self.player.disable_tracking()
+        if not self._deferred_launch_pending:
+            self._deferred_launch_pending = True
+            self.log('Deferred launch scheduled at t=%.3f' % time.time(), 2)
+
+            def _deferred_launch():
+                time.sleep(0.3)
+                self.log('Opening Up Next popup at t=%.3f' % time.time(), 2)
+                self.playback_manager.launch_up_next()
+                self.player.disable_tracking()
+                self._deferred_launch_pending = False
+
+            deferred_launch_thread = threading.Thread(target=_deferred_launch)
+            deferred_launch_thread.daemon = True
+            deferred_launch_thread.start()
+        else:
+            self.log('Deferred launch already pending, skipping duplicate scheduling', 2)
