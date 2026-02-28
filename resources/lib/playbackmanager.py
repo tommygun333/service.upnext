@@ -40,6 +40,18 @@ class PlaybackManager:
             self.demo.hide()
 
     def launch_up_next(self):
+        try:
+            is_playing_video = self.player.isPlayingVideo()
+            self.log('Player isPlayingVideo: %s' % is_playing_video, 2)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.log('Exception checking isPlayingVideo: %s' % exc, 2)
+        try:
+            play_time = self.player.getTime()
+            total_time = self.player.getTotalTime()
+            self.log('Player getTime: %s, getTotalTime: %s, TimeRemaining: %s' % (
+                play_time, total_time, total_time - play_time), 2)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.log('Exception getting player times in launch_up_next: %s' % exc, 2)
         enable_playlist = get_setting_bool('enablePlaylist')
         episode, source = self.play_item.get_next()
         self.log('Playlist setting: %s' % enable_playlist)
@@ -67,10 +79,12 @@ class PlaybackManager:
         episode_id = episode.get('episodeid')
         no_play_count = episode.get('playcount') is None or episode.get('playcount') == 0
         include_play_count = True if self.state.include_watched else no_play_count
-        if not include_play_count or self.state.current_episode_id == episode_id:
-            # play_next = False
-            # keep_playing = True
-            # return play_next, keep_playing
+        if not include_play_count:
+            self.log('exit launch_popup early: include_watched=%s, playcount=%s' % (
+                self.state.include_watched, episode.get('playcount')), 2)
+            return False, True
+        if self.state.current_episode_id == episode_id:
+            self.log('exit launch_popup early: same episode id (%s)' % episode_id, 2)
             # Don't play next file, but keep playing current file
             return False, True
 
@@ -82,9 +96,11 @@ class PlaybackManager:
 
         # We have a next up episode choose mode
         if get_setting_int('simpleMode') == 0:
+            self.log('selecting simple mode XML for popup', 2)
             next_up_page = UpNext('script-upnext-upnext-simple.xml', addon_path(), 'default', '1080i')
             still_watching_page = StillWatching('script-upnext-stillwatching-simple.xml', addon_path(), 'default', '1080i')
         else:
+            self.log('selecting fancy mode XML for popup', 2)
             next_up_page = UpNext('script-upnext-upnext.xml', addon_path(), 'default', '1080i')
             still_watching_page = StillWatching('script-upnext-stillwatching.xml', addon_path(), 'default', '1080i')
 
@@ -145,6 +161,8 @@ class PlaybackManager:
         except RuntimeError:
             self.log('exit early because player is no longer running', 2)
             return False, False
+        self.log('show_popup_and_wait: play_time=%s, total_time=%s, remaining=%s' % (
+            play_time, total_time, total_time - play_time), 2)
         progress_step_size = calculate_progress_steps(total_time - play_time)
         next_up_page.set_item(episode)
         next_up_page.set_progress_step_size(progress_step_size)
@@ -157,12 +175,20 @@ class PlaybackManager:
         showing_still_watching_page = False
         if not played_in_a_row_number or int(self.state.played_in_a_row) < int(played_in_a_row_number):
             self.log('showing next up page as played in a row is %s' % self.state.played_in_a_row, 2)
-            next_up_page.show()
+            try:
+                next_up_page.show()
+                self.log('next_up_page.show() returned', 2)
+            except Exception as exc:  # pylint: disable=broad-except
+                self.log('Exception calling next_up_page.show(): %s' % exc, 2)
             set_property('service.upnext.dialog', 'true')
             showing_next_up_page = True
         else:
             self.log('showing still watching page as played in a row %s' % self.state.played_in_a_row, 2)
-            still_watching_page.show()
+            try:
+                still_watching_page.show()
+                self.log('still_watching_page.show() returned', 2)
+            except Exception as exc:  # pylint: disable=broad-except
+                self.log('Exception calling still_watching_page.show(): %s' % exc, 2)
             set_property('service.upnext.dialog', 'true')
             showing_still_watching_page = True
         while (self.player.isPlaying() and (total_time - play_time > 1)
